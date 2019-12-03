@@ -534,28 +534,23 @@ K2 = math.ceil(t2/100)
 
 
 # Builds a mems graph including intronic mems 
-def buildMEMsGraph(read, e_memsPath, i_memsPath, refPath, gtfPath):
-    text, exons_ = extractFromInfoFile(gtfPath + ".sg")
-    BitV = BitVector(text)
-
+def buildMEMsGraph(refPath, e_memsPath, i_memsPath, gtfPath):
     #Extract exons and introns
     gtf = openGTF(gtfPath)
-    exons = set()
-    introns = set()
 
+    strand, transcripts, introns = extractFromGTF(gtf)
+
+    exons = set()
     for g in gtf.features_of_type('gene'):
         for tr in gtf.children(g, featuretype='transcript', order_by='start'):
             exons_ = list(gtf.children(tr, featuretype='exon', order_by='start'))
             exons_ = set([(ex.start, ex.end) for ex in exons_])
             exons = exons | exons_
-            introns_ = set(zip([ex.end+1 for ex in exons[:-1]], [ex.start-1 for ex in exons[1:]]))
-            introns = introns | introns_
 
     exons = list(sorted(exons))
-    introns = list(sorted(introns))
 
-    print(exons)
-    print(introns)
+    strand, transcripts, introns = extractFromGTF(gtf)
+
     # Remove exon duplicates
     for e in exons:
         for o in exons:
@@ -563,8 +558,6 @@ def buildMEMsGraph(read, e_memsPath, i_memsPath, refPath, gtfPath):
                 exons.remove(e)
                 break
     
-    # Derive the introns (TODO change to input file)
-    introns = set(zip([ex[1]+1 for ex in exons[:-1]], [ex[0]-1 for ex in exons[1:]]))
     introns = list(sorted(introns)) 
 
     # Remove intron duplicates
@@ -573,6 +566,11 @@ def buildMEMsGraph(read, e_memsPath, i_memsPath, refPath, gtfPath):
             if i != o and i[0] >= o[0] and i[1] <= o[1]:
                 introns.remove(i)
                 break
+
+
+    # Get Text
+    text = getTextFromRef(exons, refPath)
+    BitV = BitVector(text)
 
     # Exon-Intron relationship
     # ex_in = [(e1_indx, e2_indx, i1_indx), (e, e, i)]
@@ -897,6 +895,19 @@ def strToMem(str):
     mem = tuple([int(x) for x in str[1:-1].split(",")])
     return mem
 
+# Extracts the text from the .fa file
+def getTextFromRef(exons, refPath):
+    t = ""
+    text = "|"
+    with open(refPath) as f:
+        for line in f:
+            if line[0] != ">":
+                t = t + line[:-1]
+
+    for ex in exons:
+        text = text + t[ex[0] : ex[1]] +  "|"
+
+    return text
 
 # Checks if 2 MEMs are connected and calcualtes the weight of the arc
 def checkMEMs(sgmatrix, mem1, mem2, BitV, text):
@@ -1020,15 +1031,11 @@ def main(memsPath, refPath, gtfPath, errRate, tresh, outPath, allevents):
     #TODO: add this as cmd line parameter
     onlyPrimary = False
 
-
-    # !
-
-    buildMEMsGraph(refPath, "out/e_mems.mem", "out/i_mems.mem", refPath, gtfPath)
-
-
-
     # Reading reference genome
     Ref = list(SeqIO.parse(refPath, "fasta"))[0]
+
+    # !
+    buildMEMsGraph(refPath, "input/case_2.ENST00000624081_e_9593_21_5012664.exons.mem", "input/case_2.ENST00000624081_e_9593_21_5012664.introns.mem", gtfPath)
 
     # Reading annotation
     gtf = openGTF(gtfPath)
@@ -1080,3 +1087,7 @@ if __name__ == '__main__':
     allevents = args.allevents
 
     main(memsPath, refPath, gtfPath, errRate, tresh, outPath, allevents)
+
+
+
+# python3 ./scripts/detectEvents.py -g input/Homo_sapiens.GRCh38.dna.chromosome.21.fa -a input/ENSG00000279493.no2.gtf -m out/case_2.ENST00000624081_e_9593_21_5012664.exons.mem -o out/output.events.csv
