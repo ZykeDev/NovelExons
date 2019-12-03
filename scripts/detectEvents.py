@@ -460,8 +460,6 @@ def extractIntrons(memsPath, Ref, exons, BitV, errRate, onlyPrimary):
 
 
 
-
-
 class Vertex:
     def __init__(self, node, mtype):
         self.id = node
@@ -538,8 +536,6 @@ def buildMEMsGraph(refPath, e_memsPath, i_memsPath, gtfPath):
     #Extract exons and introns
     gtf = openGTF(gtfPath)
 
-    strand, transcripts, introns = extractFromGTF(gtf)
-
     exons = set()
     for g in gtf.features_of_type('gene'):
         for tr in gtf.children(g, featuretype='transcript', order_by='start'):
@@ -549,8 +545,6 @@ def buildMEMsGraph(refPath, e_memsPath, i_memsPath, gtfPath):
 
     exons = list(sorted(exons))
 
-    strand, transcripts, introns = extractFromGTF(gtf)
-
     # Remove exon duplicates
     for e in exons:
         for o in exons:
@@ -558,6 +552,7 @@ def buildMEMsGraph(refPath, e_memsPath, i_memsPath, gtfPath):
                 exons.remove(e)
                 break
     
+    strand, transcripts, introns = extractFromGTF(gtf)
     introns = list(sorted(introns)) 
 
     # Remove intron duplicates
@@ -568,7 +563,7 @@ def buildMEMsGraph(refPath, e_memsPath, i_memsPath, gtfPath):
                 break
 
 
-    # Get Text
+    # Get the exon text
     text = getTextFromRef(exons, refPath)
     BitV = BitVector(text)
 
