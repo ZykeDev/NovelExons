@@ -533,25 +533,58 @@ K2 = math.ceil(t2/100)
 
 # Builds a mems graph including intronic mems 
 def buildMEMsGraph(refPath, e_memsPath, i_memsPath, gtfPath):
-    #Extract exons and introns
     gtf = openGTF(gtfPath)
 
+    # Read the reference genome
+    genome = ""
+    text = "|"
+    with open(refPath) as f:
+        for line in f:
+            if line[0] != ">":
+                genome = genome + line[:-1]
+
+
+    # Init Adjacency Matrix
+    adjm = [[0, 0], [0, 0]]
+
     exons = set()
+    currentID = 1
+
     for g in gtf.features_of_type('gene'):
         for tr in gtf.children(g, featuretype='transcript', order_by='start'):
-            exons_ = list(gtf.children(tr, featuretype='exon', order_by='start'))
-            exons_ = set([(ex.start, ex.end) for ex in exons_])
+            exonsList = list(gtf.children(tr, featuretype='exon', order_by='start'))
+            exons_ = set([(int(ex.start), int(ex.end)) for ex in exonsList])
+
+            # TODO check strand
+
+            # Add the exon text (if it's not already there)
+            for ex in sorted(exons_):
+                if ex not in exons:
+                    text = text + genome[ex[0] : ex[1]] +  "|"
+                    if currentID > 1:
+                        # Expand Adjacency matrix
+                        adjm = expandMatrix(adjm)
+
+                        # Add arc e1 -> e2
+                        adjm[currentID-1][currentID] = 1
+
+                    currentID = currentID + 1
+                    
             exons = exons | exons_
-
-    exons = list(sorted(exons))
-
-    # Remove exon duplicates
-    for e in exons:
-        for o in exons:
-            if e != o and e[0] >= o[0] and e[1] <= o[1]:
-                exons.remove(e)
-                break
     
+    exons = sorted(exons)
+
+
+    # Build the BitVector
+    BitV = BitVector(text)
+
+    # Build parents and sons
+    parents, sons = buildParentsAndSons(adjm)
+
+    # Empty the genome var (TODO needed?)
+    genome = ""
+
+
     strand, transcripts, introns = extractFromGTF(gtf)
     introns = list(sorted(introns)) 
 
@@ -562,10 +595,6 @@ def buildMEMsGraph(refPath, e_memsPath, i_memsPath, gtfPath):
                 introns.remove(i)
                 break
 
-
-    # Get the exon text
-    text = getTextFromRef(exons, refPath)
-    BitV = BitVector(text)
 
     # Exon-Intron relationship
     # ex_in = [(e1_indx, e2_indx, i1_indx), (e, e, i)]
@@ -592,29 +621,29 @@ def buildMEMsGraph(refPath, e_memsPath, i_memsPath, gtfPath):
 
 
 
-    # Init graph
+    # Init MEMs graph
     g = Graph()
     g.add_vertex("start", "Start")
     g.add_vertex("end", "End")
     
-    sgmatrix = buildAdjacencyMatrix(gtfPath)
-    parents, sons = buildParentsAndSons(sgmatrix)
+    
     
 
     # Store all MEMs in a single list [(mems, read), (ms, r), ...]
     emems = []
     #for line in open(memsPath, 'r').readlines():
     for line in open(e_memsPath, 'r').readlines():
-        alStrand, readID, err, mems, read = readLine(line)
-        for m in mems:
-            emems.append((strToMem(m), read))
+        line = line.replace("\t", ",")
+        print(line)
+        read = ""
+        emems.append((strToMem(line), read))
 
     # Store Intronic MEMs
     imems = []
     for line in open(i_memsPath, 'r').readlines():
-        alStrand, readID, err, mems, read = readLine(line)
-        for im in mems:
-            imems.append((strToMem(im), read))
+        line = line.replace("\t", ",")
+        read = ""
+        imems.append((strToMem(line), read))
 
 
     # Convert the MEMs list to a list where 
@@ -678,7 +707,7 @@ def buildMEMsGraph(refPath, e_memsPath, i_memsPath, gtfPath):
                         m2 = mr2[0]
                         if isNew(g, m2):
                             # True if m, m2 from the same exon, False otherwise
-                            linkageInfo = checkMEMs(sgmatrix, m, m2, BitV, text)
+                            linkageInfo = checkMEMs(adjm, m, m2, BitV, text)
                             flag = linkageInfo[0]
                             err = linkageInfo[1]
 
@@ -841,21 +870,14 @@ def isValidEnd(m, sons, read, BitV, text):
 def isNew(graph, mem):
     return not(graph.has_vertex(str(mem)))
 
-# Returns the adjacency matrix from the .sg file
-def buildAdjacencyMatrix(gtfPath):
-    
-    lines = open(gtfPath + ".sg").readlines()
-    text = lines[3].strip("\n").split(" ; ")[:-1] # Ignore the last ";"
+# Expands an nxn matrix with 0s
+def expandMatrix(m):
+    nr = len(m[0]) + 1
+    for r in m:
+        r.append(0)
+    m.append([0] * nr)
 
-    matrixSize = len(text)
-    sg = [[0 for x in range(matrixSize)] for y in range(matrixSize)]
-
-    for i in range(len(text)):
-        t = text[i].split(" ")
-        for j in range(len(t)):
-            sg[i][j] = int(t[j])
-
-    return sg
+    return m
 
 
 def buildParentsAndSons(sgm):
@@ -878,34 +900,20 @@ def buildParentsAndSons(sgm):
 
 
 # Returns true if 2 exons are linked
-def contains(sgmatrix, id1, id2):
-    return sgmatrix[id1][id2] >= 1
+def contains(adjm, id1, id2):
+    return adjm[id1][id2] >= 1
 
 # Returns true if the link between the exons is new in sg
-def isNewLink(sgmatrix, id1, id2):
-    return sgmatrix[id1][id2] > 1
+def isNewLink(adjm, id1, id2):
+    return adjm[id1][id2] > 1
 
 # Converts a mem string into a tuple of ints
 def strToMem(str):
     mem = tuple([int(x) for x in str[1:-1].split(",")])
     return mem
 
-# Extracts the text from the .fa file
-def getTextFromRef(exons, refPath):
-    t = ""
-    text = "|"
-    with open(refPath) as f:
-        for line in f:
-            if line[0] != ">":
-                t = t + line[:-1]
-
-    for ex in exons:
-        text = text + t[ex[0] : ex[1]] +  "|"
-
-    return text
-
 # Checks if 2 MEMs are connected and calcualtes the weight of the arc
-def checkMEMs(sgmatrix, mem1, mem2, BitV, text):
+def checkMEMs(adjm, mem1, mem2, BitV, text):
     m1t = mem1[0]
     m1p = mem1[1]
     m1l = mem1[2]
@@ -940,7 +948,7 @@ def checkMEMs(sgmatrix, mem1, mem2, BitV, text):
                         err = gapE
                         resType = True
 
-                elif math.abs(gapP - gapE) <= K2: # Nothing / SNV Single Nucleotide Variation
+                elif abs(gapP - gapE) <= K2: # Nothing / SNV Single Nucleotide Variation
                     subP = read[m1p + m1l - 1 : m1p + m1l - 1 + gapP - 1]
                     subE = exon1_text[m1t + m1l - BitV.select(id1) - 2 : m1t + m1l - BitV.select(id1) - 2 + gapE - 1]
                     
@@ -949,7 +957,7 @@ def checkMEMs(sgmatrix, mem1, mem2, BitV, text):
 
             elif gapP <= 0 and gapE <= 0:
 
-                err = math.abs(gapP - gapE)
+                err = abs(gapP - gapE)
                 resType = True
 
             elif gapP <= 0 and gapE > K2: # Possible Intron with Overlap
@@ -958,19 +966,19 @@ def checkMEMs(sgmatrix, mem1, mem2, BitV, text):
                 resType = False
 
             else:
-                err = math.abs(gapP) + math.abs(gapE)
+                err = abs(gapP) + abs(gapE)
                 resType = True
 
     # Else, if mem1 and mem2 are from different exons
     else:
-        if contains(sgmatrix, id1, id2): # If there is an edge id1 -> id2
+        if contains(adjm, id1, id2): # If there is an edge id1 -> id2
             if m2p + m2l > m1p + m1l:
                 gapP = m2p - m1p - m1l
                 gapE1 = BitV.select(id1 + 1) + 1 - m1t - m1l
                 gapE2 = m2t - BitV.select(id2) - 2
 
                 if gapP <= 0:
-                    if not isNewLink(sgmatrix, id1, id2) and gapE1 == 0 and gapE2 == 0:
+                    if not isNewLink(adjm, id1, id2) and gapE1 == 0 and gapE2 == 0:
                         err = 0
                         resType = True
                    
@@ -980,11 +988,11 @@ def checkMEMs(sgmatrix, mem1, mem2, BitV, text):
                 else:
                     if gapE1 == 0 and gapE2 == 0:
 
-                        if not isNewLink(sgmatrix, id1, id2):
+                        if not isNewLink(adjm, id1, id2):
                             err = 0
                             resType = False
                     else:
-                        if math.abs(gapP - (gapE1 + gapE2)) <= K2: # SNV
+                        if abs(gapP - (gapE1 + gapE2)) <= K2: # SNV
                             subP = read[m1p + m1l - 1 : m1p + m1l - 1 + gapP - 1]
                             subE1 = exon1_text[m1t + m1l - BitV.select(id1) - 2 : m1t + m1l - BitV.select(id1) - 2 + gapE1 - 1]
                             subE2 = exon2_text[0 : gapE2 - 1]
@@ -992,7 +1000,7 @@ def checkMEMs(sgmatrix, mem1, mem2, BitV, text):
 
                             err = editDistance(subP, subE)
 
-                            if not isNewLink(sgmatrix, id1, id2):
+                            if not isNewLink(adjm, id1, id2):
                                 resType = True
                             else:
                                 resType = False
