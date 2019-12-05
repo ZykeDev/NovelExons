@@ -628,22 +628,21 @@ def buildMEMsGraph(refPath, e_memsPath, i_memsPath, gtfPath):
     
     
     
-
     # Store all MEMs in a single list [(mems, read), (ms, r), ...]
     emems = []
-    #for line in open(memsPath, 'r').readlines():
     for line in open(e_memsPath, 'r').readlines():
         line = line.replace("\t", ",")
-        print(line)
-        read = ""
-        emems.append((strToMem(line), read))
+        mem = strToMem(line)
+        read = text[mem[0] : mem[0] + mem[2]] # TODO check -1?
+        emems.append((mem, read))
 
     # Store Intronic MEMs
     imems = []
     for line in open(i_memsPath, 'r').readlines():
         line = line.replace("\t", ",")
-        read = ""
-        imems.append((strToMem(line), read))
+        mem = strToMem(line)
+        read = text[mem[0] : mem[0] + mem[2]] # TODO check -1?
+        imems.append((mem, read))
 
 
     # Convert the MEMs list to a list where 
