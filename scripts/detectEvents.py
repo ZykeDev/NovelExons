@@ -467,7 +467,7 @@ class Vertex:
         self.type = mtype
 
     def __str__(self):
-        return str(self.id) + ' adjacent: ' + str([x.id for x in self.adjacent])
+        return str(self.id) + ' adjacent: ' + str([(x.id, x.get_weight(self)) for x in self.adjacent])
 
     def add_neighbor(self, neighbor, weight=0):
         self.adjacent[neighbor] = weight
@@ -477,6 +477,9 @@ class Vertex:
 
     def get_id(self):
         return self.id
+
+    def get_adjacent(self):
+        return self.adjacent
 
     def get_weight(self, neighbor):
         return self.adjacent[neighbor]
@@ -519,6 +522,10 @@ class Graph:
     def get_num_vertices(self):
         return self.num_vertices
 
+    def print_graph(self):
+        for v in self.vert_dict:
+            print(self.vert_dict[v])
+
 
 
 readSize = 100
@@ -550,6 +557,7 @@ def buildMEMsGraph(refPath, e_memsPath, i_memsPath, gtfPath):
     exons = set()
     currentID = 1
 
+    # Get the Exons from the GTF
     for g in gtf.features_of_type('gene'):
         for tr in gtf.children(g, featuretype='transcript', order_by='start'):
             exonsList = list(gtf.children(tr, featuretype='exon', order_by='start'))
@@ -572,6 +580,7 @@ def buildMEMsGraph(refPath, e_memsPath, i_memsPath, gtfPath):
                     
             exons = exons | exons_
     
+    # Is sorted needed?
     exons = sorted(exons)
 
 
@@ -585,8 +594,9 @@ def buildMEMsGraph(refPath, e_memsPath, i_memsPath, gtfPath):
     genome = ""
 
 
+    # Get the Introns from the GTF
     strand, transcripts, introns = extractFromGTF(gtf)
-    introns = list(sorted(introns)) 
+    introns = sorted(introns)
 
     # Remove intron duplicates
     for i in introns:
@@ -620,12 +630,10 @@ def buildMEMsGraph(refPath, e_memsPath, i_memsPath, gtfPath):
                 ex_in.append(link)
 
 
-
     # Init MEMs graph
     g = Graph()
     g.add_vertex("start", "Start")
     g.add_vertex("end", "End")
-    
     
     
     # Store all MEMs in a single list [(mems, read), (ms, r), ...]
@@ -640,6 +648,9 @@ def buildMEMsGraph(refPath, e_memsPath, i_memsPath, gtfPath):
     imems = []
     for line in open(i_memsPath, 'r').readlines():
         line = line.replace("\t", ",")
+        if line == "" or line == "\n":  # For now ignore iMEMs where t > len(text) TODO
+            continue
+
         mem = strToMem(line)
         read = text[mem[0] : mem[0] + mem[2]] # TODO check -1?
         imems.append((mem, read))
@@ -692,7 +703,6 @@ def buildMEMsGraph(refPath, e_memsPath, i_memsPath, gtfPath):
                     if isNew(g, m):
                         continue
 
-
                 # EXTEND
                 isExt = False
                 isNov = False
@@ -711,19 +721,17 @@ def buildMEMsGraph(refPath, e_memsPath, i_memsPath, gtfPath):
                             err = linkageInfo[1]
 
                             if err >= 0:
+                                print(m, m2, err)
                                 if isNew(g, m2):
                                     g.add_vertex(str(m2), "E")
 
-                            if flag:
-                                if err > 0:
-                                    print(err, m)
-
-                                g.add_edge(str(m), str(m2), err)
-                                isExt = True
-                                isNov = True
-                            else:
-                                # Add an arc in the Novel graph (not needed?)
-                                isNov = True
+                                if flag:
+                                    g.add_edge(str(m), str(m2), err)
+                                    isExt = True
+                                    isNov = True
+                                else:
+                                    # Add an arc in the Novel graph (not needed?)
+                                    isNov = True
 
                     nextP += 1
 
@@ -742,7 +750,10 @@ def buildMEMsGraph(refPath, e_memsPath, i_memsPath, gtfPath):
                     
             
 
-    print("Built MG with", g.get_num_vertices(), "vertices")
+    print("Built MG:")
+    g.print_graph()
+
+
 
 
 
@@ -823,7 +834,7 @@ def isValidEnd(m, sons, read, BitV, text):
             id = BitV.rank(mt - 1)
             s = BitV.select(id)
             e = BitV.select(id+1)-1
-
+            
             exon_text = text[s : e]
 
             l = readSize - (mp + ml) + 1
@@ -908,7 +919,7 @@ def isNewLink(adjm, id1, id2):
 
 # Converts a mem string into a tuple of ints
 def strToMem(str):
-    mem = tuple([int(x) for x in str[1:-1].split(",")])
+    mem = tuple([int(x) for x in str[0:-1].split(",")])
     return mem
 
 # Checks if 2 MEMs are connected and calcualtes the weight of the arc
@@ -934,7 +945,6 @@ def checkMEMs(adjm, mem1, mem2, BitV, text):
     # If mem1 and mem2 are of the same exon
     if id1 == id2:
         if m2p + m2l > m1p + m1l and m1t < m2t and m1t + m1l < m2t + m2l:
-
             gapP = m2p - m1p - m1l # Gap in R
             gapE = m2t - m1t - m1l # Gap in Z
 
@@ -1038,6 +1048,8 @@ def main(memsPath, refPath, gtfPath, errRate, tresh, outPath, allevents):
 
     # !
     buildMEMsGraph(refPath, "input/case_2.ENST00000624081_e_9593_21_5012664.exons.mem", "input/case_2.ENST00000624081_e_9593_21_5012664.introns.mem", gtfPath)
+    # Exit after the graph
+    return 0
 
     # Reading annotation
     gtf = openGTF(gtfPath)
