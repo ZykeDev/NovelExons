@@ -552,7 +552,6 @@ def buildMEMsGraph(refPath, e_memsPath, i_memsPath, gtfPath):
             if line[0] != ">":
                 genome = genome + line[:-1]
 
-
     # Init Adjacency Matrix
     adjm = [[0, 0], [0, 0]]
 
@@ -628,7 +627,6 @@ def buildMEMsGraph(refPath, e_memsPath, i_memsPath, gtfPath):
     # Exon-Intron relationship
     # ex_in = [(e1_indx, e2_indx, i1_indx), (e, e, i)]
     ex_in = []
-
     if len(exons) > 1:
         exID = 1
         for e1, e2 in pairwise(exons):
@@ -659,7 +657,9 @@ def buildMEMsGraph(refPath, e_memsPath, i_memsPath, gtfPath):
     for line in open(e_memsPath, 'r').readlines():
         line = line.replace("\t", ",")
         mem = strToMem(line)
-        read = text[mem[0] : mem[0] + mem[2]] # TODO check -1?
+
+        exon_text = getTextFromID(BitV, text, BitV.rank(mem[0] - 1))
+        read = exon_text[mem[0] : mem[0] + mem[2]]
         emems.append((mem, read))
 
     # Store Intronic MEMs
@@ -667,13 +667,14 @@ def buildMEMsGraph(refPath, e_memsPath, i_memsPath, gtfPath):
     for line in open(i_memsPath, 'r').readlines():
         line = line.replace("\t", ",")
         mem = strToMem(line)
-        read = intrText[mem[0] : mem[0] + mem[2]] # TODO check -1?
+
+        intron_text = getTextFromID(IntrBitV, intrText, IntrBitV.rank(mem[0] - 1))
+        read = intron_text[mem[0] : mem[0] + mem[2]]
         imems.append((mem, read))
 
     # Convert the MEMs list to a list where 
     # list[p] = [((t1, p, l1), r1), ...]
     e_mems = [[]] * (readSize + 1)
-
     for mr in emems:
         p = mr[0][1]
         if e_mems[p] == []:
@@ -681,10 +682,8 @@ def buildMEMsGraph(refPath, e_memsPath, i_memsPath, gtfPath):
         else:
             e_mems[p].append(mr)
 
-    # -------------------------------
-
+    # Same for intron MEMs
     i_mems = [[]] * (readSize + 1)
-
     for mr in imems:
         p = mr[0][1]
         if i_mems[p] == []:
@@ -763,34 +762,47 @@ def buildMEMsGraph(refPath, e_memsPath, i_memsPath, gtfPath):
                     
             
     print("> Built MG")
-    g.print_graph()
+    #g.print_graph()
     print("")
 
 
     print("> Possible intr-fillable gaps:")
 
-    # Try to fill gaps with Intron mems
-    for (m1, m2) in intronInsertion:
-        id1 = BitV.rank(m1[0] - 1)
-        id2 = BitV.rank(m2[0] - 1)
+    # Try to fill gaps with Intron MEMs
+    for (mem1, mem2) in intronInsertion:
+        m1t = mem1[0]
+        m1p = mem1[1]
+        m1l = mem1[2]
+        m2t = mem2[0]
+        m2p = mem2[1]
+        m2l = mem2[2]
 
-        # Ignore same-exon mems for now (TODO)
+        id1 = BitV.rank(m1t - 1)
+        id2 = BitV.rank(m2t - 1)
+
+        # Ignore same-exon mems for now? (TODO)
         if id1 == id2:
             continue
 
+        # Find the intron id between the exons
         for (eID1, eID2, iID) in ex_in:
             #if (id1 == eID1 and id2 == eID2) or (id2 == eID1 and id1 == eID2): TODO?
             if id1 == eID1 and id2 == eID2:
                 # There might be an intronic MEM that better connects m1 -> intr -> m2
                 # Update the graph if we can insert an iMEM between m1 and m2
-                
-                exon1_text = getExonText(BitV, text, id1)
-                exon2_text = getExonText(BitV, text, id2)
-                intron_text = getExonText(IntrBitV, intrText, iID)
-                
-                exon1_segment = exon1_text[m1[0] : m1[0] + m1[2]]
-                exon2_segment = exon2_text[m2[0] : m2[0] + m2[2]]
+                print(mem1, "-->", mem2)
+                exon1_text = getTextFromID(BitV, text, id1)
+                exon2_text = getTextFromID(BitV, text, id2)
+                intron_text = getTextFromID(IntrBitV, intrText, iID) # Needed? TODO
 
+                exon1_read = exon1_text[m1t : m1t + m1l]
+                exon2_read = exon2_text[m2t : m2t + m2l]
+
+                if m2p + m2l > m1p + m1l:
+                    gapP = m2p - m1p - m1l
+                    print("Gap:", gapP)
+                    gapE1 = 0
+                    gapE2 = 0
 
                 for imem in i_mems:
                     for imr in imem:
@@ -800,18 +812,41 @@ def buildMEMsGraph(refPath, e_memsPath, i_memsPath, gtfPath):
 
                             # Ignore imems from other introns, we only check the one in between
                             if iID == IntrBitV.rank(im[0] - 1):
-                                if im[0] == 1698:
-                                    intron_segment = intron_text[im[0] : im[0] + im[2]]
-                                    print(intron_segment)
-                
+                                # Check overlap mem1 -> intron
+                                leftOverlap = 0
+                                rightOverlap = 0
+                                for k in range(len(exon1_read)):
+                                    if overlap(exon1_read, iread, k):
+                                        thisOverlap = len(exon1_read) - k
+                                        if leftOverlap < thisOverlap:
+                                            leftOverlap = thisOverlap
+                                
+                                for h in range(len(iread)):
+                                    if overlap(iread, exon2_text, h):
+                                        thisOverlap = len(iread) - h
+                                        if leftOverlap < thisOverlap:
+                                            leftOverlap = thisOverlap    
+                                
+                                newGapP = gapP - im[2] + leftOverlap + rightOverlap
+                                # Found linking intron mem?
+                                if newGapP <= K2:
+                                    print("  >", mem1, im, mem2)
 
-
-
+                                # TODO update graph
                 break
 
 
+# Computes the overlap between 2 strings, the first starting at s1Start
+def overlap(s1, s2, s1Start):
+    j = 0
+    s1 = s1[s1Start:]
 
+    for i in range(len(s1)):
+        if s1[i] != s2[j]:
+            return False
+        j = j + 1
 
+    return True
 
 
 
@@ -829,14 +864,14 @@ def isValidStart(mem, parents, read, BitV, text):
             err = 0
         else:
             id = BitV.rank(mt - 1)
-            exon_text = getExonText(BitV, text, id)
+            exon_text = getTextFromID(BitV, text, id)
 
             l = mp - 1 # Left in R
 
             subP = ""
             subE = ""
             if l != 0:
-                subP = read[0 : l - 1]
+                subP = read[0 : l]
 
             exon_pref_len = mt - BitV.select(id)-1 - 1
 
@@ -847,7 +882,7 @@ def isValidStart(mem, parents, read, BitV, text):
                 
                 # Exclude the fisrt parent = []
                 for par in parents[id][1:]:
-                    par_text = getExonText(BitV, text, par)
+                    par_text = getTextFromID(BitV, text, par)
 
                     par_sel = BitV.select(par)
                     par_next = BitV.select(par + 1)
@@ -864,7 +899,7 @@ def isValidStart(mem, parents, read, BitV, text):
                     if newErr < err:
                         err = newErr
             else:
-                subE = exon_text[mt - l - BitV.select(id) - 2 : l - 1]
+                subE = exon_text[mt - l - BitV.select(id) - 2 : l]
                 err = editDistance(subP, subE)
 
         if err <= K2:
@@ -885,12 +920,12 @@ def isValidEnd(m, sons, read, BitV, text):
             err = 0
         else:
             id = BitV.rank(mt - 1)            
-            exon_text = getExonText(BitV, text, id)
+            exon_text = getTextFromID(BitV, text, id)
 
             l = readSize - (mp + ml) + 1
             subP = read
 
-            subP = read[mp + ml - 1 : mp + ml - 1 + l - 1]
+            subP = read[mp + ml - 1 : mp + ml - 1 + l]
             subE = ""
 
             exon_suff_len = BitV.select(id + 1) - (mt + ml) + 1
@@ -899,16 +934,14 @@ def isValidEnd(m, sons, read, BitV, text):
                 shared_suff_len = l - exon_suff_len
                 exon_suff = ""
                 if exon_suff_len != 0:
-                    exon_suff = exon_text[mt + ml - s - 2 : mt + ml - s - 2 + exon_suff_len - 1]
+                    exon_suff = exon_text[mt + ml - s - 2 : mt + ml - s - 2 + exon_suff_len]
 
                 err = l
 
                 # Exclude the fisrt son = []
                 for son in sons[id][1:]:
-                    son_s = BitV.select(son)
-                    son_e = BitV.select(son+1)-1
-                    son_text = text[son_s : son_e]
-                    subE = exon_suff + son_text[0 : shared_suff_len - 1]
+                    son_text = getTextFromID(BitV, text, son)
+                    subE = exon_suff + son_text[0 : shared_suff_len]
 
                     curr_err = editDistance(subP, subE)
 
@@ -917,7 +950,7 @@ def isValidEnd(m, sons, read, BitV, text):
 
                 
             else:
-                subE = exon_text[mt + ml - s - 2 : mt + ml - s - 2 + l - 1]
+                subE = exon_text[mt + ml - s - 2 : mt + ml - s - 2 + l]
                 err = editDistance(subP, subE)
 
 
@@ -973,10 +1006,10 @@ def strToMem(str):
     return mem
 
 
-def getExonText(BitV, text, eid):
+def getTextFromID(BitV, text, eid):
     s = BitV.select(eid)
     e = BitV.select(eid+1)-1
-    
+
     return text[s : e]
 
 # Checks if 2 MEMs are connected and calcualtes the weight of the arc
@@ -992,8 +1025,8 @@ def checkMEMs(adjm, mem1, mem2, BitV, text):
     id1 = BitV.rank(m1t - 1)
     id2 = BitV.rank(m2t - 1)
 
-    exon1_text = text[m1t : m1t + m1l - 1]
-    exon2_text = text[m2t : m2t + m2l - 1]
+    exon1_text = text[m1t : m1t + m1l]
+    exon2_text = text[m2t : m2t + m2l]
 
     # Default error = -1
     err = -1
@@ -1015,8 +1048,8 @@ def checkMEMs(adjm, mem1, mem2, BitV, text):
                         resType = True
 
                 elif abs(gapP - gapE) <= K2: # Nothing / SNV Single Nucleotide Variation
-                    subP = read[m1p + m1l - 1 : m1p + m1l - 1 + gapP - 1]
-                    subE = exon1_text[m1t + m1l - BitV.select(id1) - 2 : m1t + m1l - BitV.select(id1) - 2 + gapE - 1]
+                    subP = read[m1p + m1l - 1 : m1p + m1l - 1 + gapP]
+                    subE = exon1_text[m1t + m1l - BitV.select(id1) - 2 : m1t + m1l - BitV.select(id1) - 2 + gapE]
                     
                     err = editDistance(subP, subE)
                     resType = True
@@ -1025,7 +1058,7 @@ def checkMEMs(adjm, mem1, mem2, BitV, text):
 
                 err = abs(gapP - gapE)
                 resType = True
-
+                                                                            # TODO check intronInsertion here as well
             elif gapP <= 0 and gapE > K2: # Possible Intron with Overlap
 
                 err = 0
@@ -1058,15 +1091,15 @@ def checkMEMs(adjm, mem1, mem2, BitV, text):
                         if not isNewLink(adjm, id1, id2):
                             err = 0
                             resType = True #FALSE  <-----------------------------------------
-                            # Link the mems anyway
-                            # Remember to check for introns after
+                            # Link the mems anyway but
+                            # remember to check for introns later
                             intronInsertion.append((mem1, mem2))
 
                     else:
                         if abs(gapP - (gapE1 + gapE2)) <= K2: # SNV
-                            subP = read[m1p + m1l - 1 : m1p + m1l - 1 + gapP - 1]
-                            subE1 = exon1_text[m1t + m1l - BitV.select(id1) - 2 : m1t + m1l - BitV.select(id1) - 2 + gapE1 - 1]
-                            subE2 = exon2_text[0 : gapE2 - 1]
+                            subP = read[m1p + m1l - 1 : m1p + m1l - 1 + gapP]
+                            subE1 = exon1_text[m1t + m1l - BitV.select(id1) - 2 : m1t + m1l - BitV.select(id1) - 2 + gapE1]
+                            subE2 = exon2_text[0 : gapE2]
                             subE = subE1 + subE2
 
                             err = editDistance(subP, subE)
