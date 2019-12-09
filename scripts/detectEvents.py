@@ -545,8 +545,8 @@ t2 = eps * readSize
 K0 = math.ceil(t1/100)
 K1 = math.ceil(t1/100) - L + 1
 K2 = math.ceil(t2/100)
-# List of mems
-intronInsertion = []
+# List of emems where an intron could be inserted
+intronConnection = []
 
 # Builds a mems graph including intronic mems 
 def buildMEMsGraph(refPath, e_memsPath, i_memsPath, gtfPath):
@@ -563,10 +563,12 @@ def buildMEMsGraph(refPath, e_memsPath, i_memsPath, gtfPath):
 
     # Init Adjacency Matrix
     adjm = [[0, 0], [0, 0]]
+    iadjm = [[0, 0], [0, 0]]
 
     exons = set()
     introns = set()
     currentID = 1
+    currentIntrID = 1
 
     # Get the Exons and Introns from the GTF
     for g in gtf.features_of_type('gene'):
@@ -574,7 +576,6 @@ def buildMEMsGraph(refPath, e_memsPath, i_memsPath, gtfPath):
             exonsList = list(gtf.children(tr, featuretype='exon', order_by='start'))
             exons_ = set([(int(ex.start), int(ex.end)) for ex in exonsList])
             introns_ = set(zip([ex.end+1 for ex in exonsList[:-1]], [ex.start-1 for ex in exonsList[1:]]))
-
             # TODO check strand +/-
 
             # Add the exon text (if it's not already there)
@@ -594,6 +595,11 @@ def buildMEMsGraph(refPath, e_memsPath, i_memsPath, gtfPath):
             for intr in sorted(introns_):
                 if intr not in introns:
                     intrText = intrText + genome[intr[0] : intr[1]] +  "|"
+                    if currentIntrID > 1:
+                        iadjm = expandMatrix(iadjm)
+                        iadjm[currentIntrID-1][currentIntrID] = 1
+
+                    currentIntrID = currentIntrID + 1
 
             exons = exons | exons_
             introns = introns | introns_
@@ -601,6 +607,7 @@ def buildMEMsGraph(refPath, e_memsPath, i_memsPath, gtfPath):
     # Is sorted needed?
     exons = sorted(exons)
     introns = sorted(introns)
+
 
     # Transitive Closure for adjm (TODO needed?)
     h = 1
@@ -619,8 +626,6 @@ def buildMEMsGraph(refPath, e_memsPath, i_memsPath, gtfPath):
     BitV = BitVector(text)
     IntrBitV = BitVector(intrText)
 
-    # Build parents and sons
-    parents, sons = buildParentsAndSons(adjm)
 
     # Empty the genome var (TODO needed?)
     genome = ""
@@ -654,13 +659,6 @@ def buildMEMsGraph(refPath, e_memsPath, i_memsPath, gtfPath):
             exID = exID + 1
 
 
-
-    # Init MEMs graph
-    g = Graph()
-    g.add_vertex("start", "Start")
-    g.add_vertex("end", "End")
-    
-    
     # Store all MEMs in a single list [(mems, read), (ms, r), ...]
     emems = []
     for line in open(e_memsPath, 'r').readlines():
@@ -700,10 +698,149 @@ def buildMEMsGraph(refPath, e_memsPath, i_memsPath, gtfPath):
         else:
             i_mems[p].append(mr)
     
-
     
-    # Insert the MEMs into the graph
-    for mlist in e_mems:
+    # Init MEMs graph
+    g = Graph()
+    ig = Graph()
+    g.add_vertex("start", "Start")
+    ig.add_vertex("start", "Start")
+    g.add_vertex("end", "End")
+    ig.add_vertex("end", "End")
+
+
+    g = insertMEMs(g, e_mems, BitV, text, adjm)
+    #ig = insertMEMs(ig, i_mems, IntrBitV, intrText, iadjm)
+
+                    
+    #print("")        
+    #print("> Built MG")
+    #g.print_graph()
+    #print("")
+
+
+    #print("> Possible intr-fillable gaps:")
+
+    # Try to fill gaps with Intron MEMs
+    for (mem1, mem2, gap, isSurrounded) in intronConnection:
+        # Case 1 [e, i, e]
+        if isSurrounded:
+            (m1t, m1p, m1l) = mem1
+            (m2t, m2p, m2l) = mem2
+
+            id1 = BitV.rank(m1t - 1)
+            id2 = BitV.rank(m2t - 1)
+
+            # Ignore same-exon mems for now? (TODO)
+            if id1 == id2:
+                continue
+
+            # Find the intron id between the exons
+            for (eID1, eID2, iID) in ex_in:
+                #if (id1 == eID1 and id2 == eID2) or (id2 == eID1 and id1 == eID2): TODO?
+                if id1 == eID1 and id2 == eID2:
+                    # There might be an intronic MEM that connects m1 -> intr -> m2
+                    # Update the graph if we can insert an iMEM between m1 and m2
+                    print(mem1, "-->", mem2)
+                    exon1_text = getTextFromID(BitV, text, id1)
+                    exon2_text = getTextFromID(BitV, text, id2)
+
+                    exon1_read = exon1_text[m1t : m1t + m1l]
+                    exon2_read = exon2_text[m2t : m2t + m2l]
+
+                    gapE1 = 0
+                    gapE2 = 0
+
+                    for imem in i_mems:
+                        for imr in imem:
+                            if imr:
+                                im = imr[0]
+                                iread = imr[1]
+
+                                if iID == IntrBitV.rank(im[0] - 1):
+                                    leftOverlap = 0
+                                    rightOverlap = 0
+
+                                    for k in range(len(exon1_read)):
+                                        if overlap(exon1_read, iread, k):
+                                            thisOverlap = len(exon1_read) - k
+                                            if leftOverlap < thisOverlap:
+                                                leftOverlap = thisOverlap
+                                    
+                                    for h in range(len(iread)):
+                                        if overlap(iread, exon2_text, h):
+                                            thisOverlap = len(iread) - h
+                                            if leftOverlap < thisOverlap:
+                                                leftOverlap = thisOverlap    
+                                    
+                                    # Ignore the overlap
+                                    #newGap = gap - im[2] + leftOverlap + rightOverlap
+                                    newGap = abs(gap - im[2])
+
+                                    # If the gap is still too big, look for another iMEM?
+                                    # OR
+                                    # Check every iMEM between mem1 and mem2 regardless?
+
+                                    # Found linking intron mem?
+                                    if newGap <= K2:
+                                        print(" >", mem1, im, mem2)
+                                        print("with gap", newGap)
+
+                                        # Update the graph
+                                        g.remove_edge(str(mem1), str(mem2))
+                                        g.add_vertex(str(im), "I")
+
+                                        g.add_edge(str(mem1), str(im), 0)
+                                        g.add_edge(str(im), str(mem2), newGap)
+
+                                        # Remove (m, m, g) from intronConnection
+                                        intronConnection.remove((mem1, mem2, gap, isSurrounded))
+
+                    break
+        
+        # Case 2 [e, i]
+        else:
+            (m1t, m1p, m1l) = mem1
+            id1 = BitV.rank(m1t - 1)
+
+            # Find the intron id after the exon
+            for (eID1, eID2, iID) in ex_in:
+                if id1 == eID1:
+                    print(mem1, "--> Intron MEM")
+                    for imem in i_mems:
+                        for imr in imem:
+                            if imr:
+                                im = imr[0]
+                                iread = imr[1]
+
+                                if iID == IntrBitV.rank(im[0] - 1):
+                                    newGap = abs(gap - im[2])
+                                    
+                                    if newGap <= K2:
+                                        print(" >", mem1, im)
+                                        print("with gap", newGap)
+
+                                        # Update the graph
+                                        g.remove_edge(str(mem1), str(mem2))
+                                        g.add_vertex(str(im), "I")
+
+                                        g.add_edge(str(mem1), str(im), 0)
+                                        g.add_edge(str(im), str(mem2), newGap)
+
+                                        # Remove (m, m, g) from intronConnection
+                                        intronConnection.remove((mem1, mem2, gap, isSurrounded))
+
+
+
+    g.print_graph()
+
+
+
+# Inserts the MEMs into the graph
+def insertMEMs(g, mems, BitV, text, adjm):
+    # Build parents and sons
+    parents, sons = buildParentsAndSons(adjm)
+
+    for mlist in mems:
         for mr in mlist:
             if mr:
                 m = mr[0]
@@ -715,7 +852,7 @@ def buildMEMsGraph(refPath, e_memsPath, i_memsPath, gtfPath):
                 # START
                 if startInfo[0]:
                     if isNew(g, m):
-                        # (If it doesn't have a father?)
+                        # (If it doesn't have a father? TODO)
                         if True:
                             # Add the new node and link it to the start
                             g.add_vertex(str(m), "E")       # mtype = E for Exons, = I for Introns
@@ -734,14 +871,15 @@ def buildMEMsGraph(refPath, e_memsPath, i_memsPath, gtfPath):
                 nextP = m[1] + 1
 
                 while nextP <= maxRead:
-                    for mr2 in e_mems[nextP]:
+                    for mr2 in mems[nextP]:
                         m2 = mr2[0]
+                        
                         if isNew(g, m2):
                             # True if m, m2 from the same exon, False otherwise
                             linkageInfo = checkMEMs(adjm, m, m2, BitV, text)
                             flag = linkageInfo[0]
                             err = linkageInfo[1]
-
+                            
                             if err >= 0:
                                 if isNew(g, m2):
                                     g.add_vertex(str(m2), "E")
@@ -751,7 +889,6 @@ def buildMEMsGraph(refPath, e_memsPath, i_memsPath, gtfPath):
                                     isExt = True
                                     isNov = True
                                 else:
-                                    # Add an arc in the Novel graph (not needed?)
                                     isNov = True
 
                     nextP += 1
@@ -768,88 +905,23 @@ def buildMEMsGraph(refPath, e_memsPath, i_memsPath, gtfPath):
                         g.add_vertex(str(m), "E")
                         g.add_edge(str(m), "end", err)
 
-                    
-            
-    print("> Built MG")
-    g.print_graph()
-    print("")
+    return g
 
 
-    print("> Possible intr-fillable gaps:")
-
-    # Try to fill gaps with Intron MEMs
-    for (mem1, mem2) in intronInsertion:
-        (m1t, m1p, m1l) = mem1
-        (m2t, m2p, m2l) = mem2
-
-        id1 = BitV.rank(m1t - 1)
-        id2 = BitV.rank(m2t - 1)
-
-        # Ignore same-exon mems for now? (TODO)
-        if id1 == id2:
-            continue
-
-        # Find the intron id between the exons
-        for (eID1, eID2, iID) in ex_in:
-            #if (id1 == eID1 and id2 == eID2) or (id2 == eID1 and id1 == eID2): TODO?
-            if id1 == eID1 and id2 == eID2:
-                # There might be an intronic MEM that better connects m1 -> intr -> m2
-                # Update the graph if we can insert an iMEM between m1 and m2
-                print(mem1, "-->", mem2)
-                exon1_text = getTextFromID(BitV, text, id1)
-                exon2_text = getTextFromID(BitV, text, id2)
-                intron_text = getTextFromID(IntrBitV, intrText, iID) # Needed? TODO
-
-                exon1_read = exon1_text[m1t : m1t + m1l]
-                exon2_read = exon2_text[m2t : m2t + m2l]
-
-                if m2p + m2l > m1p + m1l:
-                    gapP = m2p - m1p - m1l
-                    gapE1 = 0
-                    gapE2 = 0
-
-                for imem in i_mems:
-                    for imr in imem:
-                        if imr:
-                            im = imr[0]
-                            iread = imr[1]
-
-                            # Ignore imems from other introns, we only check the one in between
-                            if iID == IntrBitV.rank(im[0] - 1):
-                                # Check overlap mem1 -> intron
-                                leftOverlap = 0
-                                rightOverlap = 0
-                                for k in range(len(exon1_read)):
-                                    if overlap(exon1_read, iread, k):
-                                        thisOverlap = len(exon1_read) - k
-                                        if leftOverlap < thisOverlap:
-                                            leftOverlap = thisOverlap
-                                
-                                for h in range(len(iread)):
-                                    if overlap(iread, exon2_text, h):
-                                        thisOverlap = len(iread) - h
-                                        if leftOverlap < thisOverlap:
-                                            leftOverlap = thisOverlap    
-                                
-                                newGapP = gapP - im[2] + leftOverlap + rightOverlap
-                                
-                                # Found linking intron mem?
-                                if newGapP <= K2:
-                                    print("  >", mem1, im, mem2)
-                                    print("")
-
-                                    # Update graph
-                                    g.remove_edge(str(mem1), str(mem2))
-                                    g.add_vertex(str(im), "I")
-
-                                    g.add_edge(str(mem1), str(im), 0)
-                                    g.add_edge(str(im), str(mem2), newGapP)
-
-                                    g.print_graph()
-                break
 
 
-# Computes the overlap between 2 strings, the first starting at s1Start
+
+
+
+
+
+
+
+
+
+
+
+# Computes the overlap between 2 strings, with the first starting at s1Start
 def overlap(s1, s2, s1Start):
     j = 0
     s1 = s1[s1Start:]
@@ -1067,7 +1139,7 @@ def checkMEMs(adjm, mem1, mem2, BitV, text):
 
                 err = abs(gapP - gapE)
                 resType = True
-                                                                            # TODO check intronInsertion here as well
+                                                                            # TODO check intronConnection here as well?
             elif gapP <= 0 and gapE > K2: # Possible Intron with Overlap
 
                 err = 0
@@ -1102,7 +1174,7 @@ def checkMEMs(adjm, mem1, mem2, BitV, text):
                             resType = True #FALSE  <-----------------------------------------
                             # Link the mems anyway but
                             # remember to check for introns later
-                            intronInsertion.append((mem1, mem2))
+                            intronConnection.append((mem1, mem2, gapP, True))
 
                     else:
                         if abs(gapP - (gapE1 + gapE2)) <= K2: # SNV
@@ -1117,7 +1189,16 @@ def checkMEMs(adjm, mem1, mem2, BitV, text):
                                 resType = True
                             else:
                                 resType = False
-    
+            
+            else:
+                # mem1 and mem2 are from different exons and different reads?
+                gapE = m2t - (m1t + m1l)
+        
+                if gapE >= K2:
+                    intronConnection.append((mem1, mem2, gapE, False))
+                    # same for mem2?
+                    err = 0
+
     # Final check on err
     if err > K2:
         err = -1
@@ -1151,7 +1232,8 @@ def main(memsPath, refPath, gtfPath, errRate, tresh, outPath, allevents):
     Ref = list(SeqIO.parse(refPath, "fasta"))[0]
 
     # !
-    buildMEMsGraph(refPath, "input/case_2.ENST00000624081_e_9593_21_5012664.exons.mem", "input/case_2.ENST00000624081_e_9593_21_5012664.introns.mem", gtfPath)
+    #buildMEMsGraph(refPath, "input/case_2.ENST00000624081_e_9593_21_5012664.exons.mem", "input/case_2.ENST00000624081_e_9593_21_5012664.introns.mem", gtfPath)
+    buildMEMsGraph(refPath, "input/case_1.ENST00000624081_e_10471_21_5012624.exons.mem", "input/case_1.ENST00000624081_e_10471_21_5012624.introns.mem", gtfPath)
     # Exit after the graph
     return 0
 
