@@ -749,21 +749,59 @@ def buildMEMsGraph(refPath, e_memsPath, i_memsPath, gtfPath):
                                 iread = imr[1]
 
                                 if iID == IntrBitV.rank(im[0] - 1):
-                                    
+                                    usedImems = [im] # We assume the first imem is used
                                     newGap = abs(gap - im[2])
-                                    
-                                    if newGap <= K2:
-                                        print(" >", mem1, im)
-                                        print("with gap", newGap)
 
+                                    stop = 2
+                                    # If needed, try to connect more imems
+                                    while newGap > K2 and stop > 0:
+                                        # Stop if there are no more nodes
+                                        if not ig.has_vertex(usedImems[-1]):
+                                            break
+
+                                        thisVertex = ig.get_vertex(im)
+                                        connectedMems = [(x.id, thisVertex.get_weight(x)) for x in thisVertex.get_adjacent()]
+
+                                        # Ignore the end node
+                                        if "end" in connectedMems:
+                                            connectedMems.remove("end")
+
+                                        # Stop if the mem is not connected to anything else
+                                        if connectedMems == []:
+                                            break
+
+                                        nextMem = strToMem(connectedMems[0][0][1:-1]) # [1:-1] to remove parenthesis
+                                        # Only checks the fisrt imem TODO fix
+
+                                        nextLeftOverlap = maxOverlap(iread, intron_text[nextMem[0] : nextMem[0] + nextMem[2]])
+                                        newGap = newGap - nextMem[2] + nextLeftOverlap
+
+                                        usedImems.extend([nextMem])
+                                        stop = stop - 1
+
+                                    if newGap <= K2:
                                         # Update the graph
                                         g.remove_edge(mem1, mem2)
 
-                                        g.add_edge(mem1, im, 0, "E", "I")
-                                        g.add_edge(im, mem2, newGap)
+                                        print(">", mem1)
 
+                                        # Connect the first mem to the first imem
+                                        g.add_edge(mem1, usedImems[0], 1, "E", "I")
+
+                                        if len(usedImems) > 1:
+                                            for uim, nim in pairwise(usedImems):
+                                                intronGap = ig.get_vertex(uim).get_weight(nim)
+                                                g.add_edge(uim, nim, intronGap, "I", "I")
+                                                print(">", nim)
+
+                                        # Connect the last imem to the second mem. TODO check if this is needed
+                                        #g.add_edge(usedImems[-1], mem2, newGap, "I", "E") 
+
+                                        print(">", mem1, usedImems)
+                                        print("With gap:", newGap)
                                         # Remove (m, m, g) from intronConnection
                                         intronConnection.remove((mem1, mem2, gap, isSurrounded))
+
         
         # Case 2 [e, i, e]
         else:
@@ -800,14 +838,17 @@ def buildMEMsGraph(refPath, e_memsPath, i_memsPath, gtfPath):
                                 iread = imr[1]
 
                                 if iID == IntrBitV.rank(im[0] - 1):
-                                    usedImems = [im] # TODO dont assume the fist im always is used. Or is it?
+                                    usedImems = [im] # We assume the first imem is used
 
                                     leftOverlap = maxOverlap(exon1_text, iread)
                                     rightOverlap = maxOverlap(iread, exon2_text)
-                                    # TODO rightOverlap should only be computed on the last mem
                                     
                                     # Ignore the overlap if there is any
                                     newGap = abs(gap - im[2] + leftOverlap + rightOverlap)
+
+                                    # If multiple mems are used, rightOverlap should only be computed relative to the last one
+                                    if newGap >= K2:
+                                        newGap = newGap - rightOverlap
 
                                     stop = 2 # TODO imem limit?
                                     # Try to add a connected imem
@@ -836,25 +877,33 @@ def buildMEMsGraph(refPath, e_memsPath, i_memsPath, gtfPath):
                                         newGap = newGap - nextMem[2] + nextLeftOverlap + nextRightOverlap
 
                                         usedImems.extend([nextMem])
-
                                         stop = stop - 1
 
                                     # Found linking intron mems
                                     if newGap <= K2:
                                         # Update the graph
                                         g.remove_edge(mem1, mem2)
-                                        memsLIst = [mem1]
-                                        memsLIst.extend(usedImems)
-                                        
-                                        print(">", mem1)
-                                        for uim, nim in pairwise(memsLIst):
-                                            g.add_edge(uim, nim, 0, "I", "I")
-                                            print(">", nim)
 
-                                        g.add_edge(memsLIst[-1], mem2, newGap, "I", "E")
+                                        print(">", mem1)
+                                        startingGap = 0
+                                        if leftOverlap <= 0:
+                                            startingGap = 1
+
+                                        # Connect the first mem to the first imem
+                                        g.add_edge(mem1, usedImems[0], startingGap, "E", "I")
+                                        print(">", usedImems[0])
+
+                                        if len(usedImems) > 1:
+                                            for uim, nim in pairwise(usedImems):
+                                                intronGap = ig.get_vertex(uim).get_weight(nim)
+                                                g.add_edge(uim, nim, intronGap, "I", "I")
+                                                print(">", nim)
+
+                                        # Connect the last imem to the second mem
+                                        g.add_edge(usedImems[-1], mem2, newGap, "I", "E")
 
                                         print(">", mem2)
-                                        print("Gap:", newGap)
+                                        print("With gap:", newGap)
                                         # Remove (m, m, g) from intronConnection
                                         intronConnection.remove((mem1, mem2, gap, isSurrounded))
 
