@@ -588,10 +588,6 @@ def buildMEMsGraph(refPath, e_memsPath, i_memsPath, gtfPath):
             introns_ = set(zip([ex.end+1 for ex in exonsList[:-1]], [ex.start-1 for ex in exonsList[1:]]))
             # TODO check strand +/-
 
-            # TODO remove
-            initialIntron = (int(exonsList[0].start) - 100, int(exonsList[0].start) - 1)
-            
-
             # Add the exon text (if it's not already there)
             for ex in sorted(exons_):
                 if ex not in exons:
@@ -1099,9 +1095,7 @@ def maxOverlap(s1, s2):
 
 # Returns (true, error) if a mem is a valid starting one
 def isValidStart(mem, parents, read, BitV, text):
-    mt = mem[0]
-    mp = mem[1]
-    ml = mem[2]
+    (mt, mp, ml) = mem
 
     if mp <= K0:
         err = K2 + 1
@@ -1136,7 +1130,7 @@ def isValidStart(mem, parents, read, BitV, text):
                     # Check if the father is long enough to get its suffix
                     if par_next - shared_pref_len - par_sel - 1 >= 0:
                         subE = par_text[par_next - shared_pref_len - par_sel - 1 : shared_pref_len] + exon_pref
-                    # ELse, get the entire label
+                    # Otherwise, get the entire label
                     else:
                         subE = par_text + exon_pref
 
@@ -1155,9 +1149,7 @@ def isValidStart(mem, parents, read, BitV, text):
 
 # Returns (true, err) if the mem is a valid end
 def isValidEnd(m, sons, read, BitV, text):
-    mt = m[0]
-    mp = m[1]
-    ml = m[2]
+    (mt, mp, ml) = mem
 
     if mp + ml >= readSize - K0:
         err = K2 + 1
@@ -1168,22 +1160,22 @@ def isValidEnd(m, sons, read, BitV, text):
             id = BitV.rank(mt - 1)            
             exon_text = getTextFromID(BitV, text, id)
 
-            l = readSize - (mp + ml) + 1
+            r = readSize - (mp + ml) + 1
             subP = read
 
-            subP = read[mp + ml - 1 : mp + ml - 1 + l]
+            subP = read[mp + ml - 1 : mp + ml - 1 + r]
             subE = ""
 
             exon_suff_len = BitV.select(id + 1) - (mt + ml) + 1
             s = BitV.select(id)
 
-            if exon_suff_len < l:
-                shared_suff_len = l - exon_suff_len
+            if exon_suff_len < r:
+                shared_suff_len = r - exon_suff_len
                 exon_suff = ""
                 if exon_suff_len != 0:
                     exon_suff = exon_text[mt + ml - s - 2 : mt + ml - s - 2 + exon_suff_len]
 
-                err = l
+                err = r
 
                 # Exclude the fisrt son = []
                 for son in sons[id][1:]:
@@ -1197,7 +1189,7 @@ def isValidEnd(m, sons, read, BitV, text):
 
                 
             else:
-                subE = exon_text[mt + ml - s - 2 : mt + ml - s - 2 + l]
+                subE = exon_text[mt + ml - s - 2 : mt + ml - s - 2 + r]
                 err = editDistance(subP, subE)
 
 
