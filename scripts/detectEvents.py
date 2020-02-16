@@ -556,7 +556,7 @@ K0 = math.ceil(t1/100)
 K1 = math.ceil(t1/100) - L + 1
 K2 = math.ceil(t2/100)
 # List of emems where an intron could be inserted
-intronConnection = []
+possibleCnnct = []
 
 # Builds a mems graph including intronic mems 
 def buildMEMsGraph(refPath, e_memsPath, i_memsPath, gtfPath):
@@ -733,7 +733,7 @@ def buildMEMsGraph(refPath, e_memsPath, i_memsPath, gtfPath):
     print("\n", "> Possible intr-fillable gaps:")
 
     # Try to fill gaps with Intron MEMs
-    for (mem1, mem2, gap, isSurrounded) in intronConnection:
+    for (mem1, mem2, gap, isSurrounded) in possibleCnnct:
         (m1t, m1p, m1l) = mem1
         (m2t, m2p, m2l) = mem2
 
@@ -804,7 +804,11 @@ def buildMEMsGraph(refPath, e_memsPath, i_memsPath, gtfPath):
                                                     print(">", nim)
 
                                                 # Connect the last imem to the second mem. TODO check if this is needed
-                                                g.add_edge(nim, mem2, newGap, "I", "E") 
+                                                g.add_edge(nim, mem2, newGap, "I", "E")
+
+                                            else:   
+                                                g.add_edge(usedImems[0], mem2, newGap, "I", "E")
+
 
                                             print(">", mem1, usedImems)
                                             print("With gap:", newGap)
@@ -867,6 +871,7 @@ def buildMEMsGraph(refPath, e_memsPath, i_memsPath, gtfPath):
                                                     intronGap = ig.get_vertex(uim).get_weight(nim)
                                                     g.add_edge(uim, nim, intronGap, "I", "I")
                                                     print(">", nim)
+
 
                                             print(">", usedImems, mem1)
                                             print("With gap:", newGap)
@@ -1005,7 +1010,7 @@ def insertMEMs(g, mems, BitV, text, adjm, mtype):
                             # If it does, try to connect an intron mem during intr-fill
                             if mtype == "E":
                                 # Case 3
-                                intronConnection.append((m, m, m[1]-1, False))
+                                possibleCnnct.append((m, m, m[1]-1, False))
 
                 else:
                     if isNew(g, m):
@@ -1332,10 +1337,10 @@ def checkMEMs(adjm, mem1, mem2, BitV, text, read):
                         # Gap only in R, possible insertion
                         if not isNewLink(adjm, id1, id2):
                             err = 0
-                            resType = True #FALSE  <---------------------------------------- TODO
-                            # Link the mems anyway, but check intronConnection later
+                            resType = True
+                            # Link the mems anyway, but check possibleCnnct later
                             # Case 1
-                            intronConnection.append((mem1, mem2, gapP, True))
+                            possibleCnnct.append((mem1, mem2, gapP, True))
 
                     else:
                         if abs(gapP - (gapE1 + gapE2)) <= K2: # SNV
@@ -1357,7 +1362,7 @@ def checkMEMs(adjm, mem1, mem2, BitV, text, read):
         
                 if gapE >= K2:
                     # Case 2
-                    intronConnection.append((mem1, mem2, gapE, False))
+                    possibleCnnct.append((mem1, mem2, gapE, False))
                     err = 0
 
     # Final check on err
