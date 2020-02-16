@@ -788,7 +788,7 @@ def buildMEMsGraph(refPath, e_memsPath, i_memsPath, gtfPath):
                                             usedImems.extend([nextMem])
                                             stop = stop - 1
 
-                                        if newGap <= K2:
+                                        if newGap <= K2 or stop == 0:
                                             # Update the graph
                                             g.remove_edge(mem1, mem2)
 
@@ -860,7 +860,7 @@ def buildMEMsGraph(refPath, e_memsPath, i_memsPath, gtfPath):
                                             usedImems.extend([nextMem])
                                             stop = stop - 1
                                         
-                                        if newGap <= K2:
+                                        if newGap <= K2 or stop == 0:
                                             # Update the graph
 
                                             # Connect the found imem to the emem
@@ -952,7 +952,7 @@ def buildMEMsGraph(refPath, e_memsPath, i_memsPath, gtfPath):
                                         stop = stop - 1
 
                                     # Found linking intron mems
-                                    if newGap <= K2:
+                                    if newGap <= K2 or stop == 0:
                                         # Update the graph
                                         g.remove_edge(mem1, mem2)
 
