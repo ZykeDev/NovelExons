@@ -491,7 +491,10 @@ class Vertex:
         return self.adjacent
 
     def get_weight(self, neighbor):
-        return self.adjacent[neighbor]
+        if neighbor not in self.adjacent:
+            return 0
+        else:
+            return self.adjacent[neighbor]
 
 class Graph:
     def __init__(self):
@@ -1153,7 +1156,7 @@ def isValidStart(mem, parents, read, BitV, text):
     return (False, K2 + 1)
 
 # Returns (true, err) if the mem is a valid end
-def isValidEnd(m, sons, read, BitV, text):
+def isValidEnd(mem, sons, read, BitV, text):
     (mt, mp, ml) = mem
 
     if mp + ml >= readSize - K0:
